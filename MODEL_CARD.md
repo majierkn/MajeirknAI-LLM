@@ -12,8 +12,6 @@
 | Idioma de interface | Português do Brasil |
 | Execução | Local no dispositivo após instalação |
 | Contexto inicial | 2.048 tokens |
-| Servidor | llama.cpp `llama-server` (API `/v1/chat/completions`) |
-| Interface | terminal próprio + página web própria (PWA) |
 
 ## Proveniência
 
@@ -29,9 +27,3 @@ Conversão usada: https://huggingface.co/SoAIHQ/Qwen3.5-2B-GGUF
 - Não inclui navegação na internet, pesquisa em tempo real ou acesso a arquivos do usuário.
 - Pode produzir respostas incorretas ou inventar detalhes.
 - O uso de RAM, aquecimento e velocidade ainda precisam de medição no aparelho-alvo.
-- O endpoint `/v1/chat/completions` re-renderiza o histórico a cada turno: o cache de
-  contexto só é reutilizado até a primeira resposta, e o restante é reprocessado.
-  O launcher limita o histórico enviado para conter esse custo.
-- O checkpoint de sessão (`use_slot_cache`) grava o contexto em disco e acelera a
-  retomada; ele vale apenas para o mesmo arquivo de modelo.
-- O binário distribuído é `arm64`; em outras arquiteturas o instalador compila do fonte.

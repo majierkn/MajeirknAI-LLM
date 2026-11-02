@@ -16,7 +16,7 @@ class LoadConfigTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "config.json"
         self.base = {
-            "model_path": "models/model.gguf",
+            "model_path": "modelos/model.gguf",
             "context_size": 2048,
             "temperature": 0.7,
             "top_p": 0.8,
@@ -38,7 +38,7 @@ class LoadConfigTest(unittest.TestCase):
     def test_config_antigo_continua_valido(self) -> None:
         # O config da v0.1 so tinha estas chaves.
         config = config_mod.load_config(self.write(self.base))
-        self.assertEqual(config["model_path"], "models/model.gguf")
+        self.assertEqual(config["model_path"], "modelos/model.gguf")
         self.assertEqual(config["context_size"], 2048)
 
     def test_missing_required_key_fails(self) -> None:

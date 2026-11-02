@@ -3,23 +3,13 @@ vendor/
 __pycache__/
 *.py[cod]
 .DS_Store
+MajeirknAI-LLM.zip
+modelos/*.gguf
 
-# Distribuicao: os tarballs ficam em dist/ e nao vao no repositorio
-dist/
-*.zip
+# Arquivos locais e modelos grandes
+conversas.db
+*.gguf
+MajeirknAI-LLM.zip
 
-# Projeto Android
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-*.apk
-*.aab
-
-# Assets gerados: a fonte unica e majeirkn/ui e o runtime publicado como release.
-# O CI (ou scripts/pack_apk_assets.sh) preenche esses diretorios antes do build.
-android/app/src/main/assets/arm64-v8a/
-android/app/src/main/assets/webui/
-
-# Empacotamento temporario
-.majeirkn-pack/
+# Runtime distribuído pela GitHub Release
+dist/*.tar.gz

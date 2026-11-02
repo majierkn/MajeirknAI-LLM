@@ -18,7 +18,7 @@ UI_DIR = ROOT / "majeirkn" / "ui"
 def make_config(**overrides) -> dict:
     config = {
         **config_mod.DEFAULTS,
-        "model_path": "models/model.gguf",
+        "model_path": "modelos/model.gguf",
         "system_prompt": "Voce e a Majeirkn AI.",
         "temperature": 0.7,
         "top_p": 0.8,

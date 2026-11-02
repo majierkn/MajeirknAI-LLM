@@ -45,7 +45,7 @@ publicar na Play Store, configure um keystore e use `assembleRelease`.
 ## O modelo
 
 O APK **não inclui os pesos** (1,3 GB). No primeiro uso o app procura um
-arquivo `.gguf` em `Download/`, `Download/models/`, `MajeirknAI/models/` e na
+arquivo `.gguf` em `Download/`, `Download/modelos/`, `MajeirknAI/modelos/` e na
 pasta interna; se não achar, pede para você escolher o arquivo. Use o mesmo
 arquivo baixado pelo `scripts/download_model.sh`.
 
