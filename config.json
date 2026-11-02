@@ -4,7 +4,24 @@
   "threads": 4,
   "temperature": 0.7,
   "top_p": 0.8,
+  "top_k": 40,
+  "min_p": 0.05,
   "repeat_penalty": 1.1,
+  "max_tokens": 512,
   "enable_thinking": false,
+
+  "batch_size": 512,
+  "ubatch_size": 128,
+  "flash_attn": "auto",
+  "cache_type_k": "f16",
+  "cache_type_v": "f16",
+  "parallel": 1,
+
+  "host": "127.0.0.1",
+  "port": 8081,
+  "web_ui": "majeirkn",
+  "use_slot_cache": true,
+  "data_dir": "~/.majeirkn",
+
   "system_prompt": "Você é Majeirkn AI, um assistente de inteligência artificial local. Responda sempre em português do Brasil, com clareza e precisão. Quando não souber algo, diga que não sabe e não invente informações. Explique assuntos técnicos passo a passo. Considere que você está executando localmente no dispositivo do usuário e não possui acesso à internet, a menos que isso seja explicitamente fornecido."
 }

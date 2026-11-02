@@ -1,0 +1,74 @@
+name: APK
+
+# Builda o APK a cada alteracao no projeto Android (e sob demanda).
+# Repositorios privados tem minutos gratuitos suficientes para isso.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "majeirkn/ui/**"
+      - ".github/workflows/apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ------------------------------------------------------------ binarios
+      # O CI nao compila o llama.cpp: usa o pacote de runtime publicado como
+      # release (scripts/pack_runtime.sh). Configure o segredo do repositorio.
+      - name: Baixar o runtime do llama.cpp
+        env:
+          RUNTIME_URL: ${{ secrets.MAJEIRKN_RUNTIME_URL }}
+        run: |
+          if [ -z "$RUNTIME_URL" ]; then
+            echo "::error::Defina o segredo MAJEIRKN_RUNTIME_URL com o link do tarball de runtime."
+            exit 1
+          fi
+          curl -fsSL "$RUNTIME_URL" -o runtime.tar.gz
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf runtime.tar.gz -C "$RUNNER_TEMP" --strip-components=1 runtime/bin
+          rm -rf android/app/src/main/assets/arm64-v8a
+          mkdir -p android/app/src/main/assets/arm64-v8a
+          find "$RUNNER_TEMP/bin" -maxdepth 1 -type f -exec cp -L {} android/app/src/main/assets/arm64-v8a/ \;
+          echo "arquivos nativos: $(ls android/app/src/main/assets/arm64-v8a | wc -l)"
+
+      # ------------------------------------------------------- interface web
+      - name: Copiar a interface web
+        run: |
+          rm -rf android/app/src/main/assets/webui
+          mkdir -p android/app/src/main/assets/webui
+          cp -a majeirkn/ui/. android/app/src/main/assets/webui/
+
+      - name: Copiar as licencas
+        run: |
+          mkdir -p android/app/src/main/assets/licenses
+          cp -a LICENSE android/app/src/main/assets/licenses/majeirkn-MIT.txt
+          curl -fsSL https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE \
+            -o android/app/src/main/assets/licenses/llama.cpp-MIT.txt || true
+
+      # -------------------------------------------------------------- build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # assembleDebug ja vem assinado com a chave de depuracao: instalavel sem
+      # configurar keystore. Para publicar na Play, use assembleRelease.
+      - name: Build do APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Publicar o APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: majeirkn-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

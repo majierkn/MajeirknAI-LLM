@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Majeirkn AI</string>
+    <string name="service_channel_name">Majeirkn AI</string>
+    <string name="service_channel_description">Servidor local do modelo</string>
+    <string name="service_notification_title">Majeirkn AI esta rodando</string>
+    <string name="service_notification_text">Toque para abrir a conversa</string>
+    <string name="loading_model">Carregando o modelo, aguarde…</string>
+    <string name="server_failed">Nao foi possivel iniciar o servidor local</string>
+</resources>
