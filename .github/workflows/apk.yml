@@ -36,6 +36,19 @@ jobs:
           find "$RUNNER_TEMP/bin" -maxdepth 1 -type f -exec cp -L {} android/app/src/main/assets/arm64-v8a/ \;
           echo "arquivos nativos: $(ls android/app/src/main/assets/arm64-v8a | wc -l)"
 
+      - name: Verificar que o binario carrega
+        # Os aliases de versao sao criados em runtime pelo app; aqui os recriamos
+        # para garantir que o conjunto que vai no APK funciona.
+        run: |
+          cd android/app/src/main/assets/arm64-v8a
+          ln -sf libggml-base.so.0.28.0 libggml-base.so.0
+          ln -sf libggml-cpu.so.0.28.0 libggml-cpu.so.0
+          ln -sf libggml.so.0.28.0 libggml.so.0
+          ln -sf libllama-common.so.0.8.0 libllama-common.so.0
+          ln -sf libllama.so.0.8.0 libllama.so.0
+          ln -sf libmtmd.so.0.8.0 libmtmd.so.0
+          LD_LIBRARY_PATH="$PWD" ./llama-server --version
+
       # ------------------------------------------------------- interface web
       - name: Copiar a interface web
         run: |
