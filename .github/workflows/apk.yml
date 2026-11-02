@@ -4,7 +4,7 @@ name: APK
 # Repositorios privados tem minutos gratuitos suficientes para isso.
 on:
   push:
-    branches: [main]
+    branches: [main, principal]
     paths:
       - "android/**"
       - "majeirkn/ui/**"
@@ -36,18 +36,46 @@ jobs:
           find "$RUNNER_TEMP/bin" -maxdepth 1 -type f -exec cp -L {} android/app/src/main/assets/arm64-v8a/ \;
           echo "arquivos nativos: $(ls android/app/src/main/assets/arm64-v8a | wc -l)"
 
-      - name: Verificar que o binario carrega
-        # Os aliases de versao sao criados em runtime pelo app; aqui os recriamos
-        # para garantir que o conjunto que vai no APK funciona.
+      - name: Verificar arquitetura do runtime Android
+        # O runtime e compilado para Android ARM64. O runner do GitHub e Linux
+        # x86_64, portanto nao devemos tentar executar o llama-server aqui.
         run: |
           cd android/app/src/main/assets/arm64-v8a
-          ln -sf libggml-base.so.0.28.0 libggml-base.so.0
-          ln -sf libggml-cpu.so.0.28.0 libggml-cpu.so.0
-          ln -sf libggml.so.0.28.0 libggml.so.0
-          ln -sf libllama-common.so.0.8.0 libllama-common.so.0
-          ln -sf libllama.so.0.8.0 libllama.so.0
-          ln -sf libmtmd.so.0.8.0 libmtmd.so.0
-          LD_LIBRARY_PATH="$PWD" ./llama-server --version
+
+          sudo apt-get update
+          sudo apt-get install -y binutils file
+
+          echo "Verificando arquitetura do llama-server..."
+          file ./llama-server
+          readelf -h ./llama-server
+
+          readelf -h ./llama-server | grep -q 'Machine:.*AArch64' || {
+            echo "::error::llama-server nao e um binario ARM64 (AArch64)"
+            exit 1
+          }
+
+          for lib in \
+            libggml-base.so.0.28.0 \
+            libggml-cpu.so.0.28.0 \
+            libggml.so.0.28.0 \
+            libllama-common.so.0.8.0 \
+            libllama.so.0.8.0 \
+            libmtmd.so.0.8.0 \
+            libllama-server-impl.so; do
+
+            test -s "$lib" || {
+              echo "::error::Biblioteca ausente ou vazia: $lib"
+              exit 1
+            }
+
+            readelf -h "$lib" | grep -q 'Machine:.*AArch64' || {
+              echo "::error::Biblioteca nao e ARM64: $lib"
+              exit 1
+            }
+          done
+
+          echo "Runtime Android ARM64 validado com sucesso!"
+
 
       # ------------------------------------------------------- interface web
       - name: Copiar a interface web
