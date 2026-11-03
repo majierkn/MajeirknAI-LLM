@@ -31,6 +31,16 @@ mkdir -p "$STAGE/bin" "$STAGE/licenses" "$OUT"
 # por *.so pegaria so os links e geraria um pacote que nao carrega.
 cp -a "$BIN"/. "$STAGE/bin"/
 
+# Dependencias do Termux que o Android nao fornece (o app Android as exige).
+for name in libssl.so.3 libcrypto.so.3 libc++_shared.so; do
+  if [[ ! -e "$STAGE/bin/$name" ]]; then
+    cp -aL "${PREFIX:-/data/data/com.termux/files/usr}/lib/$name" "$STAGE/bin/$name" || {
+      echo "dependencia ausente: $name (instale com: pkg install openssl libc++)"
+      exit 1
+    }
+  fi
+done
+
 # Auto-verificacao: roda o binario empacotado com as libs do proprio pacote.
 # Sem isso, um pacote com link quebrado passaria despercebido.
 echo "verificando o pacote..."

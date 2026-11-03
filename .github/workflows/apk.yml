@@ -63,6 +63,9 @@ jobs:
             libllama-common.so.0.8.0 \
             libllama.so.0.8.0 \
             libmtmd.so.0.8.0 \
+            libssl.so.3 \
+            libcrypto.so.3 \
+            libc++_shared.so \
             libllama-server-impl.so; do
 
             test -s "$lib" || {

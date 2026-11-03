@@ -104,6 +104,19 @@ class LlamaService : Service() {
                 .apply { environment()["LD_LIBRARY_PATH"] = nativeDir.absolutePath + ":" + applicationInfo.nativeLibraryDir }
                 .start()
             ServerLog.write(this, "iniciado: ${command.joinToString(" ")}")
+            // Le a saida do llama-server: mostra o motivo real de qualquer falha
+            // (biblioteca ausente, modelo invalido...) e evita o pipe encher.
+            val started = process
+            Thread {
+                try {
+                    started?.inputStream?.bufferedReader()?.forEachLine { line ->
+                        ServerLog.write(this, line)
+                    }
+                    ServerLog.write(this, "processo encerrou, codigo=${started?.waitFor()}")
+                } catch (_: Exception) {
+                    // leitura interrompida ao parar o servico: nada a fazer
+                }
+            }.apply { isDaemon = true; name = "llama-server-log" }.start()
         } catch (error: Exception) {
             ServerLog.write(this, "falha ao iniciar: ${error.message}")
             stopServer()

@@ -41,12 +41,30 @@ REAL_FILES=(
   libmtmd.so.0.8.0
 )
 
+# Dependencias do Termux que o Android nao fornece: sem elas o llama-server
+# morre com "library libssl.so.3 not found".
+EXTRA_LIBS=(
+  libssl.so.3
+  libcrypto.so.3
+  libc++_shared.so
+)
+
 rm -rf "$STAGE"
 mkdir -p "$STAGE/arm64-v8a"
 
 for name in "${REAL_FILES[@]}"; do
   [[ -e "$BIN/$name" ]] || { echo "arquivo ausente no build: $name"; exit 1; }
   cp -a "$BIN/$name" "$STAGE/arm64-v8a/$name"
+done
+for name in "${EXTRA_LIBS[@]}"; do
+  if [[ -e "$BIN/$name" ]]; then
+    cp -aL "$BIN/$name" "$STAGE/arm64-v8a/$name"
+  elif [[ -e "${PREFIX:-/data/data/com.termux/files/usr}/lib/$name" ]]; then
+    cp -aL "${PREFIX:-/data/data/com.termux/files/usr}/lib/$name" "$STAGE/arm64-v8a/$name"
+  else
+    echo "dependencia ausente: $name (instale com: pkg install openssl libc++)"
+    exit 1
+  fi
 done
 chmod +x "$STAGE/arm64-v8a/llama-server" "$STAGE/arm64-v8a/llama-cli"
 
