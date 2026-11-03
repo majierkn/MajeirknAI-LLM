@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "br.com.majeirkn.majeirknai"
-        minSdk = 26          // Android 8.0: cobre a maioria dos aparelhos ativos
+        minSdk = 28          // Android 9.0: alinhado ao runtime Android NDK (API 28)
         targetSdk = 34
         versionCode = 1
         versionName = "0.2.0"
