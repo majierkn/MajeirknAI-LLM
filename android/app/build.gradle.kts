@@ -34,7 +34,7 @@ android {
     // Os binarios do llama.cpp entram em app/src/main/jniLibs/arm64-v8a/.
     // O pacote nao usa JNI: o llama-server e executado como processo filho.
     packaging {
-        jniLibs.useLegacyPackaging = false
+        jniLibs.useLegacyPackaging = true
     }
 }
 
