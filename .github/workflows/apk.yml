@@ -1,117 +1,126 @@
-name: APK Android ARM64
+name: APK Android ARM64 (CPU)
 
 on:
   workflow_dispatch:
-    inputs:
-      runtime_url:
-        description: "URL direta do .tar.gz do runtime Snapdragon ARM64"
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: "29.0.14206865"
+      ANDROID_PLATFORM: "android-28"
     steps:
-      - name: Checkout
+      - name: Baixar o projeto
         uses: actions/checkout@v4
-
-      - name: Obter ou usar runtime Snapdragon ARM64
-        env:
-          INPUT_RUNTIME_URL: ${{ github.event.inputs.runtime_url }}
-          SECRET_RUNTIME_URL: ${{ secrets.MAJEIRKN_RUNTIME_URL }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          RUNTIME_URL="${INPUT_RUNTIME_URL:-}"
-          if [[ -z "$RUNTIME_URL" ]]; then RUNTIME_URL="${SECRET_RUNTIME_URL:-}"; fi
-
-          ASSETS="android/app/src/main/assets/arm64-v8a"
-          JNI="android/app/src/main/jniLibs/arm64-v8a"
-          if [[ -n "$RUNTIME_URL" ]]; then
-            curl --fail --location --retry 3 --retry-delay 2 "$RUNTIME_URL" -o "$RUNNER_TEMP/llama-runtime.tar.gz"
-            mkdir -p "$RUNNER_TEMP/runtime-unpacked"
-            tar -xzf "$RUNNER_TEMP/llama-runtime.tar.gz" -C "$RUNNER_TEMP/runtime-unpacked"
-
-            ROOT="$RUNNER_TEMP/runtime-unpacked/llama.cpp"
-            SERVER="$ROOT/bin/libllama-server.so"
-            LIBDIR="$ROOT/lib"
-            if [[ ! -s "$SERVER" || ! -d "$LIBDIR" ]]; then
-              echo "::error::Runtime invalido. Esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so."
-              find "$RUNNER_TEMP/runtime-unpacked" -maxdepth 4 -type f -print
-              exit 1
-            fi
-
-            rm -rf "$ASSETS" "$JNI"
-            mkdir -p "$ASSETS" "$JNI"
-            find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/" \;
-            install -m 0755 "$SERVER" "$JNI/libllama-server.so"
-          elif [[ ! -s "$JNI/libllama-server.so" ]]; then
-            echo "::error::Runtime nao encontrado. Informe runtime_url ou inclua os assets ARM64 no repositorio."
-            exit 1
-          else
-            echo "Usando runtime ARM64 ja empacotado no codigo-fonte."
-          fi
-
-          REQUIRED_LIBS=(
-            libllama-server-impl.so
-            libllama-common.so
-            libmtmd.so
-            libllama.so
-            libggml.so
-            libggml-cpu.so
-            libggml-opencl.so
-            libggml-hexagon.so
-            libggml-base.so
-          )
-          for lib in "${REQUIRED_LIBS[@]}"; do
-            test -s "$ASSETS/$lib" || { echo "::error::Biblioteca ausente: $lib"; exit 1; }
-          done
-
-      - name: Validar arquitetura ARM64
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          sudo apt-get update
-          sudo apt-get install -y binutils file
-          ASSETS="android/app/src/main/assets/arm64-v8a"
-          SERVER="android/app/src/main/jniLibs/arm64-v8a/libllama-server.so"
-          file "$SERVER"
-          readelf -h "$SERVER" | grep -q 'Machine:.*AArch64' || { echo "::error::Servidor nao e AArch64."; exit 1; }
-
-          REQUIRED_LIBS=(
-            libllama-server-impl.so
-            libllama-common.so
-            libmtmd.so
-            libllama.so
-            libggml.so
-            libggml-cpu.so
-            libggml-opencl.so
-            libggml-hexagon.so
-            libggml-base.so
-          )
-          for lib in "${REQUIRED_LIBS[@]}"; do
-            file "$ASSETS/$lib"
-            readelf -h "$ASSETS/$lib" | grep -q 'Machine:.*AArch64' || { echo "::error::$lib nao e ELF ARM64."; exit 1; }
-          done
-          echo "Bibliotecas AArch64 validadas. Os arquivos libggml-htp-v*.so sao blobs Qualcomm DSP6 e nao ELF ARM64."
-
-      - name: Copiar interface web e licencas
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mkdir -p android/app/src/main/assets/webui android/app/src/main/assets/licenses
-          cp -a majeirkn/ui/. android/app/src/main/assets/webui/
-          cp LICENSE android/app/src/main/assets/licenses/majeirkn-MIT.txt
-          curl --fail --location https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE -o android/app/src/main/assets/licenses/llama.cpp-MIT.txt
 
       - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Configurar Android SDK e NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Android NDK
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Instalar ferramentas de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential binutils file
+
+      - name: Obter llama.cpp oficial
+        run: git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+
+      - name: Compilar llama-server portátil para Android ARM64
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SRC="$RUNNER_TEMP/llama.cpp"
+          BUILD="$RUNNER_TEMP/llama-build-android"
+          INSTALL="$RUNNER_TEMP/llama-install"
+
+          cmake -S "$SRC" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
+            -DCMAKE_ANDROID_STL_TYPE=c++_static \
+            -DGGML_CPU_KLEIDIAI=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TESTS=OFF
+
+          cmake --build "$BUILD" --config Release --target llama-server --parallel 2
+          cmake --install "$BUILD" --prefix "$INSTALL" --config Release
+
+          SERVER="$INSTALL/bin/llama-server"
+          if [[ ! -s "$SERVER" ]]; then
+            echo "::error::llama-server nao foi instalado no caminho esperado."
+            find "$INSTALL" -maxdepth 4 -type f -print || true
+            exit 1
+          fi
+
+          ASSETS="$GITHUB_WORKSPACE/android/app/src/main/assets/arm64-v8a"
+          JNI="$GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a"
+          rm -rf "$ASSETS" "$JNI"
+          mkdir -p "$ASSETS" "$JNI"
+          for LIBDIR in "$INSTALL/lib" "$INSTALL/lib64"; do
+            if [[ -d "$LIBDIR" ]]; then
+              find "$LIBDIR" -maxdepth 1 -type f -name '*.so*' -exec cp -L {} "$ASSETS/" \\;
+            fi
+          done
+          install -m 0755 "$SERVER" "$JNI/libllama-server.so"
+
+          echo "ASSETS_DIR=$ASSETS" >> "$GITHUB_ENV"
+          echo "SERVER_FILE=$JNI/libllama-server.so" >> "$GITHUB_ENV"
+
+      - name: Validar ELF e dependencias Android
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          file "$SERVER_FILE"
+          readelf -h "$SERVER_FILE" | grep -q 'Machine:.*AArch64' || {
+            echo "::error::O executavel llama-server nao e AArch64."; exit 1;
+          }
+
+          for lib in "$ASSETS_DIR"/*.so*; do
+            [[ -e "$lib" ]] || continue
+            readelf -h "$lib" | grep -q 'Machine:.*AArch64' || {
+              echo "::error::Biblioteca nao e AArch64: $lib"; exit 1;
+            }
+          done
+
+          echo "Dependencias dinamicas do servidor:"
+          readelf -d "$SERVER_FILE" | grep NEEDED || true
+          if readelf -d "$SERVER_FILE" | grep -Eiq 'lib(OpenCL|ssl|crypto|ggml-hexagon|ggml-htp)'; then
+            echo "::error::O servidor CPU nao pode depender de OpenCL, OpenSSL ou backend Qualcomm."; exit 1;
+          fi
+          echo "Runtime ARM64 CPU validado. Nenhum binario Snapdragon/Hexagon foi utilizado."
+
+      - name: Copiar interface web e licencas
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ASSETS="android/app/src/main/assets"
+          mkdir -p "$ASSETS/webui" "$ASSETS/licenses"
+          cp -a majeirkn/ui/. "$ASSETS/webui/"
+          cp LICENSE "$ASSETS/licenses/majeirkn-MIT.txt"
+          curl --fail --location https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE \
+            -o "$ASSETS/licenses/llama.cpp-MIT.txt"
 
       - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -125,7 +134,7 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: majeirkn-apk-arm64
+          name: majeirkn-apk-arm64-cpu
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
