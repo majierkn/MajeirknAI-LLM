@@ -1,61 +1,46 @@
 #!/usr/bin/env bash
-# Prepara o APK usando o runtime Android ARM64 fornecido em .tar.gz.
-# Uso: MAJEIRKN_RUNTIME_ARCHIVE=/caminho/runtime.tar.gz bash scripts/pack_apk_assets.sh
+# Empacota um llama.cpp Android arm64-v8a ja compilado pelo NDK.
+# Uso: LLAMA_INSTALL_DIR=/caminho/install bash scripts/pack_apk_assets.sh
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ARCHIVE="${MAJEIRKN_RUNTIME_ARCHIVE:-}"
-if [[ -z "$ARCHIVE" || ! -s "$ARCHIVE" ]]; then
-  echo "Informe MAJEIRKN_RUNTIME_ARCHIVE com o caminho do .tar.gz Android ARM64."
+INSTALL_DIR="${LLAMA_INSTALL_DIR:-}"
+if [[ -z "$INSTALL_DIR" || ! -d "$INSTALL_DIR" ]]; then
+  echo "Informe LLAMA_INSTALL_DIR apontando para o prefixo de cmake --install."
   exit 2
 fi
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/unpacked"
-tar -xzf "$ARCHIVE" -C "$WORK/unpacked"
-RUNTIME="$WORK/unpacked/llama.cpp"
-SERVER="$RUNTIME/bin/libllama-server.so"
-LIBDIR="$RUNTIME/lib"
-[[ -s "$SERVER" && -d "$LIBDIR" ]] || {
-  echo "Runtime invalido: esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so"
+SERVER="$INSTALL_DIR/bin/llama-server"
+if [[ ! -s "$SERVER" ]]; then
+  echo "Executavel ausente: $SERVER"
   exit 1
-}
-
+fi
 command -v readelf >/dev/null 2>&1 || {
-  echo "Instale binutils para validar o ELF (Termux: pkg install binutils)."
+  echo "Instale binutils para validar o executavel (Termux: pkg install binutils)."
   exit 1
 }
 readelf -h "$SERVER" | grep -q 'Machine:.*AArch64' || {
-  echo "O executavel nao e ARM64/AArch64."; exit 1;
+  echo "llama-server nao e ELF ARM64/AArch64."; exit 1;
 }
 
 ASSETS="$ROOT/android/app/src/main/assets"
 JNI="$ROOT/android/app/src/main/jniLibs/arm64-v8a"
 rm -rf "$ASSETS/arm64-v8a" "$JNI"
 mkdir -p "$ASSETS/arm64-v8a" "$ASSETS/webui" "$ASSETS/licenses" "$JNI"
-find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/arm64-v8a/" \;
-
-REQUIRED_LIBS=(
-  libllama-server-impl.so
-  libllama-common.so
-  libmtmd.so
-  libllama.so
-  libggml.so
-  libggml-cpu.so
-  libggml-opencl.so
-  libggml-hexagon.so
-  libggml-base.so
-)
-for lib in "${REQUIRED_LIBS[@]}"; do
-  [[ -s "$ASSETS/arm64-v8a/$lib" ]] || { echo "Biblioteca ausente: $lib"; exit 1; }
-  readelf -h "$ASSETS/arm64-v8a/$lib" | grep -q 'Machine:.*AArch64' || {
-    echo "$lib nao e ELF ARM64."; exit 1;
+for libdir in "$INSTALL_DIR/lib" "$INSTALL_DIR/lib64"; do
+  if [[ -d "$libdir" ]]; then
+    find "$libdir" -maxdepth 1 -type f -name '*.so*' -exec cp -L {} "$ASSETS/arm64-v8a/" \\;
+  fi
+done
+for lib in "$ASSETS/arm64-v8a"/*.so*; do
+  [[ -e "$lib" ]] || continue
+  readelf -h "$lib" | grep -q 'Machine:.*AArch64' || {
+    echo "Biblioteca nao e ELF ARM64: $lib"; exit 1;
   }
 done
-
-# O executavel PIE fica em jniLibs para o Android extraí-lo com permissao de
-# execucao. Nunca execute o binario diretamente de filesDir/assets.
+if readelf -d "$SERVER" | grep -Eiq 'lib(OpenCL|ssl|crypto|ggml-hexagon|ggml-htp)'; then
+  echo "O servidor nao parece ser um build CPU portatil: detectada dependencia OpenCL/OpenSSL/Qualcomm."
+  exit 1
+fi
 install -m 0755 "$SERVER" "$JNI/libllama-server.so"
 rm -rf "$ASSETS/webui" "$ASSETS/licenses"
 mkdir -p "$ASSETS/webui" "$ASSETS/licenses"
@@ -65,7 +50,8 @@ if [[ -f "$ROOT/vendor/llama.cpp/LICENSE" ]]; then
   cp "$ROOT/vendor/llama.cpp/LICENSE" "$ASSETS/licenses/llama.cpp-MIT.txt"
 fi
 
-echo "Assets Android ARM64 preparados."
+echo "Assets Android ARM64 CPU preparados."
 echo "Servidor: $JNI/libllama-server.so"
 echo "Bibliotecas: $ASSETS/arm64-v8a/"
-echo "Aviso: libOpenCL.so precisa estar acessivel pelo driver Qualcomm do aparelho."
+echo "Dependencias NEEDED:"
+readelf -d "$JNI/libllama-server.so" | grep NEEDED || true
