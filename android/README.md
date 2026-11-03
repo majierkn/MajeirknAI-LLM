@@ -1,56 +1,53 @@
-# Majeirkn AI para Android (APK ARM64)
+# Majeirkn AI para Android (ARM64 CPU)
 
-O aplicativo executa llama-server como processo filho e abre a interface web local em http://127.0.0.1:8081.
+O aplicativo executa `llama-server` como processo filho e abre a interface web local em `http://127.0.0.1:8081`.
 
-## Runtime Snapdragon ARM64
+## Compatibilidade do dispositivo
 
-O pacote de runtime fornecido tem a estrutura:
+O build fornecido pelo workflow é um runtime Android `arm64-v8a` portável, com backend CPU e KleidiAI opcional. Ele não usa OpenCL, Hexagon, HTP nem bibliotecas exclusivas de Snapdragon. Isso permite gerar um APK para aparelhos ARM64 com diferentes fabricantes de SoC, incluindo dispositivos MediaTek, desde que tenham memória suficiente para o modelo escolhido.
 
-~~~text
-llama.cpp/
-  bin/libllama-server.so
-  lib/libllama-server-impl.so
-  lib/libllama-common.so
-  lib/libmtmd.so
-  lib/libllama.so
-  lib/libggml.so
-  lib/libggml-cpu.so
-  lib/libggml-opencl.so
-  lib/libggml-hexagon.so
-  lib/libggml-base.so
-  lib/libggml-htp-v*.so   # blobs Qualcomm DSP6, nao ELF ARM64
-~~~
+O Samsung Galaxy M53 5G (SM-M536B) usa MediaTek Dimensity 900; por isso, o pacote Snapdragon/Qualcomm enviado anteriormente não é usado neste build. O novo runtime é compilado a partir do código oficial do llama.cpp com Android NDK, para CPU ARM64 genérica.
 
-O executável PIE do servidor é instalado em app/src/main/jniLibs/arm64-v8a/libllama-server.so. Com extractNativeLibs=true, o Android extrai esse arquivo em ApplicationInfo.nativeLibraryDir, onde o serviço o inicia. Isso evita executar o binário diretamente em filesDir e corrige o caminho associado ao erro 13.
+## Como o runtime é compilado
 
-As bibliotecas e os blobs Qualcomm são copiados dos assets para filesDir/bin. Os SONAMEs do pacote são nomes sem versão, como libllama.so e libggml.so. O serviço também mantém compatibilidade com arquivos versionados de runtimes antigos.
+O workflow usa Android NDK e CMake com as opções recomendadas pelo projeto oficial llama.cpp para Android:
 
-**Compatibilidade:** este runtime é direcionado a aparelhos Snapdragon compatíveis. libggml-opencl.so depende de libOpenCL.so, que precisa ser fornecida e estar acessível pelo driver Qualcomm do aparelho. Os arquivos libggml-htp-v*.so são blobs Qualcomm DSP6 e não bibliotecas ELF ARM64 comuns; são mantidos como arquivos de dados para o backend Hexagon.
+- ABI `arm64-v8a` e plataforma Android 28 (API 28).
+- `GGML_NATIVE=OFF`, necessário em compilação cruzada.
+- `GGML_OPENMP=OFF` e `GGML_LLAMAFILE=OFF` para evitar dependências não suportadas nessa configuração.
+- `LLAMA_OPENSSL=OFF`, porque OpenSSL não faz parte da API nativa estável do Android NDK.
+- `GGML_CPU_KLEIDIAI=ON`, com seleção de kernels compatíveis em tempo de execução.
 
-O runtime recebido não declara dependência de libssl.so.3 nem libcrypto.so.3, então o build não exige esses arquivos. libc++_shared.so também não é adicionada sem dependência ELF explícita.
+O executável PIE é instalado em `app/src/main/jniLibs/arm64-v8a/libllama-server.so`. Com `extractNativeLibs=true`, o Android extrai o arquivo em `ApplicationInfo.nativeLibraryDir`, onde o serviço o inicia. Isso evita o erro 13 associado à execução de binários copiados para `filesDir`.
 
-## Preparar assets manualmente
+Bibliotecas compartilhadas, se existirem no prefixo de instalação, ficam em `app/src/main/assets/arm64-v8a/` e são copiadas para `filesDir/bin`. O serviço mantém compatibilidade com SONAMEs versionados de builds antigos e ignora aliases quando o arquivo de destino não existe.
 
-Em Termux/Linux com tar e binutils instalados:
+## Gerar o APK no GitHub
 
-~~~bash
-MAJEIRKN_RUNTIME_ARCHIVE=/caminho/llama-cpp-snapdragon.tar.gz bash scripts/pack_apk_assets.sh
-~~~
+1. Abra o repositório `majierkn/MajeirknAI-LLM` no GitHub.
+2. Entre na aba **Actions**.
+3. Selecione **APK Android ARM64 (CPU)**.
+4. Clique em **Run workflow** e confirme.
+5. Quando terminar com sucesso, abra a execução e baixe o artefato `majeirkn-apk-arm64-cpu`.
 
-## Gerar o APK pelo GitHub Actions
+Não é necessário enviar o runtime Snapdragon, configurar uma URL de tarball ou criar o segredo `MAJEIRKN_RUNTIME_URL`: o GitHub Actions compila o llama.cpp para Android ARM64 durante o build.
 
-1. Publique o arquivo .tar.gz do runtime em um GitHub Release ou outro local que ofereça uma URL direta de download.
-2. Abra Actions > APK Android ARM64 > Run workflow.
-3. Cole a URL direta no campo runtime_url. Alternativamente, configure o segredo MAJEIRKN_RUNTIME_URL com a mesma URL.
-4. Quando o processo terminar, baixe o artefato majeirkn-apk-arm64 e instale o APK de depuração.
+## Modelo de IA
 
-O workflow valida as bibliotecas AArch64, copia a interface web, compila com Gradle e publica o APK como artefato. A compilação não substitui o teste em um aparelho Snapdragon real: disponibilidade de libOpenCL.so, suporte do backend Hexagon e compatibilidade do modelo precisam ser verificados no dispositivo.
+O APK não inclui pesos GGUF. No primeiro uso, selecione um arquivo `.gguf` acessível ao aplicativo. O tamanho do modelo, quantização, contexto e memória livre determinam se ele consegue carregar e responder. Comece com um modelo pequeno e quantizado.
 
-## Modelo e limitações
+## Requisitos e observações
 
-O APK não inclui os pesos GGUF. No primeiro uso, selecione um arquivo .gguf local. O modelo precisa caber na memória RAM disponível.
+- Android 9 (API 28) ou mais recente.
+- ABI `arm64-v8a`.
+- Espaço livre para o APK, modelo e cache; RAM suficiente para o modelo.
+- Build de depuração assinado com a chave de debug do Gradle; não é uma versão assinada para publicação na Play Store.
+- Uma execução verde no GitHub Actions comprova a compilação, mas ainda é necessário instalar e testar o APK em um aparelho real. O desempenho varia conforme CPU, RAM, temperatura e tamanho do GGUF.
 
-- Android 8.0 (API 26) ou mais recente; ABI arm64-v8a.
-- Aparelho Snapdragon compatível com os drivers exigidos pelo runtime.
-- O provedor de documentos precisa permitir acesso a um caminho local que o servidor consiga abrir.
-- O APK gerado pelo workflow é de depuração e ainda precisa de teste no aparelho antes de distribuição.
+## Preparação manual dos assets
+
+Depois de compilar e instalar o llama.cpp com Android NDK, é possível preparar os assets localmente:
+
+```bash
+LLAMA_INSTALL_DIR=/caminho/para/install bash scripts/pack_apk_assets.sh
+```
