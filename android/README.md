@@ -1,66 +1,56 @@
-# Majeirkn AI para Android (APK)
+# Majeirkn AI para Android (APK ARM64)
 
-Aplicativo que executa o mesmo modelo do projeto, sem o Termux: o `llama-server`
-roda como processo filho dentro do app e a interface web abre em um WebView.
+O aplicativo executa llama-server como processo filho e abre a interface web local em http://127.0.0.1:8081.
 
-## Como funciona
+## Runtime Snapdragon ARM64
 
-```
-MajeirknApp
-  MainActivity  ->  WebView em http://127.0.0.1:8081
-  LlamaService  ->  processo filho llama-server
-                     (binarios copiados de assets para os arquivos do app)
-```
+O pacote de runtime fornecido tem a estrutura:
 
-- **Sem JNI e sem reescrever inferência**: os binários do llama.cpp são os
-  mesmos usados no Termux, empacotados em `app/src/main/assets/arm64-v8a/`.
-- A interface web é a **mesma** do projeto (`majeirkn/ui`), copiada para
-  `app/src/main/assets/webui/`.
-- O serviço cria os apelidos de biblioteca (`libX.so.0` -> `libX.so.0.28.0`)
-  no diretório privado do app, onde o sistema aceita links simbólicos.
+~~~text
+llama.cpp/
+  bin/libllama-server.so
+  lib/libllama-server-impl.so
+  lib/libllama-common.so
+  lib/libmtmd.so
+  lib/libllama.so
+  lib/libggml.so
+  lib/libggml-cpu.so
+  lib/libggml-opencl.so
+  lib/libggml-hexagon.so
+  lib/libggml-base.so
+  lib/libggml-htp-v*.so   # blobs Qualcomm DSP6, nao ELF ARM64
+~~~
 
-## Preparar os assets
+O executável PIE do servidor é instalado em app/src/main/jniLibs/arm64-v8a/libllama-server.so. Com extractNativeLibs=true, o Android extrai esse arquivo em ApplicationInfo.nativeLibraryDir, onde o serviço o inicia. Isso evita executar o binário diretamente em filesDir e corrige o caminho associado ao erro 13.
 
-No Termux, com o projeto compilado (`scripts/install_termux.sh`):
+As bibliotecas e os blobs Qualcomm são copiados dos assets para filesDir/bin. Os SONAMEs do pacote são nomes sem versão, como libllama.so e libggml.so. O serviço também mantém compatibilidade com arquivos versionados de runtimes antigos.
 
-```bash
-bash scripts/pack_apk_assets.sh
-```
+**Compatibilidade:** este runtime é direcionado a aparelhos Snapdragon compatíveis. libggml-opencl.so depende de libOpenCL.so, que precisa ser fornecida e estar acessível pelo driver Qualcomm do aparelho. Os arquivos libggml-htp-v*.so são blobs Qualcomm DSP6 e não bibliotecas ELF ARM64 comuns; são mantidos como arquivos de dados para o backend Hexagon.
 
-Isso copia os binários verificados e a interface web para `app/src/main/assets`.
-O script falha se o `llama-server` não executar com o conjunto de arquivos.
+O runtime recebido não declara dependência de libssl.so.3 nem libcrypto.so.3, então o build não exige esses arquivos. libc++_shared.so também não é adicionada sem dependência ELF explícita.
 
-## Buildar
+## Preparar assets manualmente
 
-Opção A — Android Studio: abra a pasta `android/` e rode o app.
+Em Termux/Linux com tar e binutils instalados:
 
-Opção B — CI (recomendado, não precisa instalar o SDK): o workflow
-`.github/workflows/apk.yml` builda o APK a cada push. Configure o segredo
-`MAJEIRKN_RUNTIME_URL` do repositório com o link do tarball de runtime
-(`scripts/pack_runtime.sh` gera o arquivo). O APK sai em *Artifacts*.
+~~~bash
+MAJEIRKN_RUNTIME_ARCHIVE=/caminho/llama-cpp-snapdragon.tar.gz bash scripts/pack_apk_assets.sh
+~~~
 
-O APK gerado é de depuração (`assembleDebug`), já assinado e instalável. Para
-publicar na Play Store, configure um keystore e use `assembleRelease`.
+## Gerar o APK pelo GitHub Actions
 
-## O modelo
+1. Publique o arquivo .tar.gz do runtime em um GitHub Release ou outro local que ofereça uma URL direta de download.
+2. Abra Actions > APK Android ARM64 > Run workflow.
+3. Cole a URL direta no campo runtime_url. Alternativamente, configure o segredo MAJEIRKN_RUNTIME_URL com a mesma URL.
+4. Quando o processo terminar, baixe o artefato majeirkn-apk-arm64 e instale o APK de depuração.
 
-O APK **não inclui os pesos** (1,3 GB). No primeiro uso o app procura um
-arquivo `.gguf` em `Download/`, `Download/modelos/`, `MajeirknAI/modelos/` e na
-pasta interna; se não achar, pede para você escolher o arquivo. Use o mesmo
-arquivo baixado pelo `scripts/download_model.sh`.
+O workflow valida as bibliotecas AArch64, copia a interface web, compila com Gradle e publica o APK como artefato. A compilação não substitui o teste em um aparelho Snapdragon real: disponibilidade de libOpenCL.so, suporte do backend Hexagon e compatibilidade do modelo precisam ser verificados no dispositivo.
 
-## Requisitos
+## Modelo e limitações
 
-- Android 8.0 (API 26) ou mais recente.
-- Arquitetura `arm64-v8a` (praticamente todos os aparelhos atuais).
-- Cerca de 3 GB de RAM livres: o modelo Q4_K_M ocupa 1,25 GB mais o cache.
+O APK não inclui os pesos GGUF. No primeiro uso, selecione um arquivo .gguf local. O modelo precisa caber na memória RAM disponível.
 
-## Limitações conhecidas
-
-- O caminho do modelo é resolvido pelo SAF (`DocumentsContract`); URIs de
-  provedores que não expõem caminho real (alguns apps de nuvem) não funcionam,
-  porque o `llama-server` precisa de um caminho de arquivo.
-- Compilar aqui no Termux **não é possível**: falta o SDK do Android. O build
-  acontece no PC ou na CI.
-- O APK ainda não foi testado em aparelho: a lógica é a mesma validada no
-  Termux, mas o primeiro teste real deve ser feito por você.
+- Android 8.0 (API 26) ou mais recente; ABI arm64-v8a.
+- Aparelho Snapdragon compatível com os drivers exigidos pelo runtime.
+- O provedor de documentos precisa permitir acesso a um caminho local que o servidor consiga abrir.
+- O APK gerado pelo workflow é de depuração e ainda precisa de teste no aparelho antes de distribuição.
