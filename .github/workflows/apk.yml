@@ -34,7 +34,9 @@ jobs:
           rm -rf android/app/src/main/assets/arm64-v8a
           mkdir -p android/app/src/main/assets/arm64-v8a
           find "$RUNNER_TEMP/bin" -maxdepth 1 -type f -exec cp -L {} android/app/src/main/assets/arm64-v8a/ \;
-          echo "arquivos nativos: $(ls android/app/src/main/assets/arm64-v8a | wc -l)"
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          install -m 0755 android/app/src/main/assets/arm64-v8a/llama-server android/app/src/main/jniLibs/arm64-v8a/libllama-server.so
+          echo "llama-server empacotado como biblioteca nativa extraida pelo Android"
 
       - name: Verificar arquitetura do runtime Android
         # O runtime e compilado para Android ARM64. O runner do GitHub e Linux
