@@ -199,7 +199,6 @@ class LlamaService : Service() {
             "--port", PORT.toString(),
             "--parallel", "1",
             "--no-warmup",
-            "--reasoning-budget", "0",
             "--path", webDir.absolutePath,
         )
     }
