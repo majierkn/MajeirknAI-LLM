@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Baixar e preparar runtime
+      - name: Obter ou usar runtime Snapdragon ARM64
         env:
           INPUT_RUNTIME_URL: ${{ github.event.inputs.runtime_url }}
           SECRET_RUNTIME_URL: ${{ secrets.MAJEIRKN_RUNTIME_URL }}
@@ -27,30 +27,33 @@ jobs:
           set -Eeuo pipefail
           RUNTIME_URL="${INPUT_RUNTIME_URL:-}"
           if [[ -z "$RUNTIME_URL" ]]; then RUNTIME_URL="${SECRET_RUNTIME_URL:-}"; fi
-          if [[ -z "$RUNTIME_URL" ]]; then
-            echo "::error::Informe a URL direta do runtime no campo runtime_url ou configure MAJEIRKN_RUNTIME_URL."
-            exit 1
-          fi
-
-          curl --fail --location --retry 3 --retry-delay 2 "$RUNTIME_URL" -o "$RUNNER_TEMP/llama-runtime.tar.gz"
-          mkdir -p "$RUNNER_TEMP/runtime-unpacked"
-          tar -xzf "$RUNNER_TEMP/llama-runtime.tar.gz" -C "$RUNNER_TEMP/runtime-unpacked"
-
-          ROOT="$RUNNER_TEMP/runtime-unpacked/llama.cpp"
-          SERVER="$ROOT/bin/libllama-server.so"
-          LIBDIR="$ROOT/lib"
-          if [[ ! -s "$SERVER" || ! -d "$LIBDIR" ]]; then
-            echo "::error::Runtime invalido. Esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so."
-            find "$RUNNER_TEMP/runtime-unpacked" -maxdepth 4 -type f -print
-            exit 1
-          fi
 
           ASSETS="android/app/src/main/assets/arm64-v8a"
           JNI="android/app/src/main/jniLibs/arm64-v8a"
-          rm -rf "$ASSETS" "$JNI"
-          mkdir -p "$ASSETS" "$JNI"
-          find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/" \;
-          install -m 0755 "$SERVER" "$JNI/libllama-server.so"
+          if [[ -n "$RUNTIME_URL" ]]; then
+            curl --fail --location --retry 3 --retry-delay 2 "$RUNTIME_URL" -o "$RUNNER_TEMP/llama-runtime.tar.gz"
+            mkdir -p "$RUNNER_TEMP/runtime-unpacked"
+            tar -xzf "$RUNNER_TEMP/llama-runtime.tar.gz" -C "$RUNNER_TEMP/runtime-unpacked"
+
+            ROOT="$RUNNER_TEMP/runtime-unpacked/llama.cpp"
+            SERVER="$ROOT/bin/libllama-server.so"
+            LIBDIR="$ROOT/lib"
+            if [[ ! -s "$SERVER" || ! -d "$LIBDIR" ]]; then
+              echo "::error::Runtime invalido. Esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so."
+              find "$RUNNER_TEMP/runtime-unpacked" -maxdepth 4 -type f -print
+              exit 1
+            fi
+
+            rm -rf "$ASSETS" "$JNI"
+            mkdir -p "$ASSETS" "$JNI"
+            find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/" \;
+            install -m 0755 "$SERVER" "$JNI/libllama-server.so"
+          elif [[ ! -s "$JNI/libllama-server.so" ]]; then
+            echo "::error::Runtime nao encontrado. Informe runtime_url ou inclua os assets ARM64 no repositorio."
+            exit 1
+          else
+            echo "Usando runtime ARM64 ja empacotado no codigo-fonte."
+          fi
 
           REQUIRED_LIBS=(
             libllama-server-impl.so
