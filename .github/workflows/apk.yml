@@ -1,12 +1,6 @@
 name: APK Android ARM64
 
 on:
-  push:
-    branches: [main, principal]
-    paths:
-      - "android/**"
-      - "majeirkn/ui/**"
-      - ".github/workflows/apk.yml"
   workflow_dispatch:
     inputs:
       runtime_url:
