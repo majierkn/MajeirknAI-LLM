@@ -101,7 +101,7 @@ class LlamaService : Service() {
             process = ProcessBuilder(command)
                 .directory(nativeDir)
                 .redirectErrorStream(true)
-                .apply { environment()["LD_LIBRARY_PATH"] = nativeDir.absolutePath }
+                .apply { environment()["LD_LIBRARY_PATH"] = nativeDir.absolutePath + ":" + applicationInfo.nativeLibraryDir }
                 .start()
             ServerLog.write(this, "iniciado: ${command.joinToString(" ")}")
         } catch (error: Exception) {
@@ -175,7 +175,7 @@ class LlamaService : Service() {
     private fun buildCommand(nativeDir: File, webDir: File, modelPath: String): List<String> {
         val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceAtLeast(2)
         return listOf(
-            nativeDir.resolve("llama-server").absolutePath,
+            File(applicationInfo.nativeLibraryDir, "libllama-server.so").absolutePath,
             "--model", modelPath,
             "--ctx-size", "2048",
             "--threads", threads.toString(),
