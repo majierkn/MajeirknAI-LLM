@@ -1,99 +1,71 @@
-#!/data/data/com.termux/files/usr/bin/bash
-# Copia o runtime compilado e a interface web para dentro do projeto Android,
-# em app/src/main/assets, de onde o APK os empacota.
-#
-#   android/app/src/main/assets/arm64-v8a/   binarios do llama.cpp
-#   android/app/src/main/assets/webui/       interface web
-#   android/app/src/main/assets/licenses/    licencas (MIT)
-#
-# A verificacao do binario acontece em $HOME: a pasta do projeto fica no
-# armazenamento compartilhado, que nao guarda o bit de execucao (nem aceita
-# symlinks). Dentro do APK isso nao importa - o servico copia os arquivos para
-# a area privada do app e aplica setExecutable(true) la.
+#!/usr/bin/env bash
+# Prepara o APK usando o runtime Android ARM64 fornecido em .tar.gz.
+# Uso: MAJEIRKN_RUNTIME_ARCHIVE=/caminho/runtime.tar.gz bash scripts/pack_apk_assets.sh
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="${LLAMA_BUILD_DIR:-$HOME/majeirkn-build}"
-BIN="$BUILD_DIR/bin"
-ASSETS="$ROOT/android/app/src/main/assets"
-STAGE="${MAJEIRKN_STAGE:-$HOME/.majeirkn-apk-pack}"
+ARCHIVE="${MAJEIRKN_RUNTIME_ARCHIVE:-}"
+if [[ -z "$ARCHIVE" || ! -s "$ARCHIVE" ]]; then
+  echo "Informe MAJEIRKN_RUNTIME_ARCHIVE com o caminho do .tar.gz Android ARM64."
+  exit 2
+fi
 
-[[ -x "$BIN/llama-server" ]] || {
-  echo "llama-server nao encontrado em $BIN"
-  echo "Compile com: bash scripts/install_termux.sh"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK/unpacked"
+tar -xzf "$ARCHIVE" -C "$WORK/unpacked"
+RUNTIME="$WORK/unpacked/llama.cpp"
+SERVER="$RUNTIME/bin/libllama-server.so"
+LIBDIR="$RUNTIME/lib"
+[[ -s "$SERVER" && -d "$LIBDIR" ]] || {
+  echo "Runtime invalido: esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so"
   exit 1
 }
 
-# ---------------------------------------------------------------- 1. staging
-# So os arquivos reais + os executivos (~23 MB). Os nomes alternativos
-# (libX.so.0) sao criados em runtime pelo servico Android no diretorio privado
-# do app, que aceita symlinks; copiar cada alias duplicaria o tamanho do APK.
-REAL_FILES=(
-  llama-server
-  llama-cli
-  libllama-server-impl.so
-  libllama-cli-impl.so
-  libggml-base.so.0.28.0
-  libggml-cpu.so.0.28.0
-  libggml.so.0.28.0
-  libllama-common.so.0.8.0
-  libllama.so.0.8.0
-  libmtmd.so.0.8.0
-)
-
-# Dependencias do Termux que o Android nao fornece: sem elas o llama-server
-# morre com "library libssl.so.3 not found".
-EXTRA_LIBS=(
-  libssl.so.3
-  libcrypto.so.3
-  libc++_shared.so
-)
-
-rm -rf "$STAGE"
-mkdir -p "$STAGE/arm64-v8a"
-
-for name in "${REAL_FILES[@]}"; do
-  [[ -e "$BIN/$name" ]] || { echo "arquivo ausente no build: $name"; exit 1; }
-  cp -a "$BIN/$name" "$STAGE/arm64-v8a/$name"
-done
-for name in "${EXTRA_LIBS[@]}"; do
-  if [[ -e "$BIN/$name" ]]; then
-    cp -aL "$BIN/$name" "$STAGE/arm64-v8a/$name"
-  elif [[ -e "${PREFIX:-/data/data/com.termux/files/usr}/lib/$name" ]]; then
-    cp -aL "${PREFIX:-/data/data/com.termux/files/usr}/lib/$name" "$STAGE/arm64-v8a/$name"
-  else
-    echo "dependencia ausente: $name (instale com: pkg install openssl libc++)"
-    exit 1
-  fi
-done
-chmod +x "$STAGE/arm64-v8a/llama-server" "$STAGE/arm64-v8a/llama-cli"
-
-# Recria os aliases para validar o conjunto exato que vai no APK.
-ln -sf libggml-base.so.0.28.0 "$STAGE/arm64-v8a/libggml-base.so.0"
-ln -sf libggml-cpu.so.0.28.0 "$STAGE/arm64-v8a/libggml-cpu.so.0"
-ln -sf libggml.so.0.28.0 "$STAGE/arm64-v8a/libggml.so.0"
-ln -sf libllama-common.so.0.8.0 "$STAGE/arm64-v8a/libllama-common.so.0"
-ln -sf libllama.so.0.8.0 "$STAGE/arm64-v8a/libllama.so.0"
-ln -sf libmtmd.so.0.8.0 "$STAGE/arm64-v8a/libmtmd.so.0"
-
-# Verifica de verdade: carrega as libs do proprio conjunto.
-echo "verificando os binarios..."
-if ! LD_LIBRARY_PATH="$STAGE/arm64-v8a" "$STAGE/arm64-v8a/llama-server" --version >/dev/null 2>&1; then
-  echo "FALHA: o llama-server nao executa com os arquivos do pacote."
+command -v readelf >/dev/null 2>&1 || {
+  echo "Instale binutils para validar o ELF (Termux: pkg install binutils)."
   exit 1
+}
+readelf -h "$SERVER" | grep -q 'Machine:.*AArch64' || {
+  echo "O executavel nao e ARM64/AArch64."; exit 1;
+}
+
+ASSETS="$ROOT/android/app/src/main/assets"
+JNI="$ROOT/android/app/src/main/jniLibs/arm64-v8a"
+rm -rf "$ASSETS/arm64-v8a" "$JNI"
+mkdir -p "$ASSETS/arm64-v8a" "$ASSETS/webui" "$ASSETS/licenses" "$JNI"
+find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/arm64-v8a/" \;
+
+REQUIRED_LIBS=(
+  libllama-server-impl.so
+  libllama-common.so
+  libmtmd.so
+  libllama.so
+  libggml.so
+  libggml-cpu.so
+  libggml-opencl.so
+  libggml-hexagon.so
+  libggml-base.so
+)
+for lib in "${REQUIRED_LIBS[@]}"; do
+  [[ -s "$ASSETS/arm64-v8a/$lib" ]] || { echo "Biblioteca ausente: $lib"; exit 1; }
+  readelf -h "$ASSETS/arm64-v8a/$lib" | grep -q 'Machine:.*AArch64' || {
+    echo "$lib nao e ELF ARM64."; exit 1;
+  }
+done
+
+# O executavel PIE fica em jniLibs para o Android extraí-lo com permissao de
+# execucao. Nunca execute o binario diretamente de filesDir/assets.
+install -m 0755 "$SERVER" "$JNI/libllama-server.so"
+rm -rf "$ASSETS/webui" "$ASSETS/licenses"
+mkdir -p "$ASSETS/webui" "$ASSETS/licenses"
+cp -a "$ROOT/majeirkn/ui/." "$ASSETS/webui/"
+cp "$ROOT/LICENSE" "$ASSETS/licenses/majeirkn-MIT.txt"
+if [[ -f "$ROOT/vendor/llama.cpp/LICENSE" ]]; then
+  cp "$ROOT/vendor/llama.cpp/LICENSE" "$ASSETS/licenses/llama.cpp-MIT.txt"
 fi
 
-# ------------------------------------------------------------- 2. no projeto
-rm -rf "$ASSETS/arm64-v8a" "$ASSETS/webui" "$ASSETS/licenses"
-mkdir -p "$ASSETS/arm64-v8a" "$ASSETS/webui" "$ASSETS/licenses"
-
-# So arquivos regulares: os aliases do staging sao apenas para a verificacao
-# local e precisam ficar de fora (o APK os recria em runtime).
-find "$STAGE/arm64-v8a" -maxdepth 1 -type f -exec cp -rL {} "$ASSETS/arm64-v8a/" \;
-
-cp -a "$ROOT/majeirkn/ui/." "$ASSETS/webui/"
-cp -a "$ROOT/LICENSE" "$ASSETS/licenses/majeirkn-MIT.txt"
-cp -a "$ROOT/vendor/llama.cpp/LICENSE" "$ASSETS/licenses/llama.cpp-MIT.txt" 2>/dev/null || true
-
-echo "Assets do APK atualizados em $ASSETS"
-du -sh "$ASSETS/arm64-v8a" "$ASSETS/webui" "$ASSETS/licenses"
+echo "Assets Android ARM64 preparados."
+echo "Servidor: $JNI/libllama-server.so"
+echo "Bibliotecas: $ASSETS/arm64-v8a/"
+echo "Aviso: libOpenCL.so precisa estar acessivel pelo driver Qualcomm do aparelho."

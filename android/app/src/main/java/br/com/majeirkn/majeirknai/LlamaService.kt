@@ -154,6 +154,9 @@ class LlamaService : Service() {
         LIBRARY_ALIASES.forEach { (alias, realFile) ->
             val link = File(target, alias)
             if (link.exists()) return@forEach
+            // Runtimes antigos podem usar arquivos versionados. O runtime
+            // Snapdragon atual usa SONAMEs sem versao; nao crie links quebrados.
+            if (!File(target, realFile).isFile) return@forEach
             try {
                 android.system.Os.symlink(realFile, link.absolutePath)
             } catch (error: Exception) {
