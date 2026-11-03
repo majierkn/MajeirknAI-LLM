@@ -1,7 +1,5 @@
-name: APK
+name: APK Android ARM64
 
-# Builda o APK a cada alteracao no projeto Android (e sob demanda).
-# Repositorios privados tem minutos gratuitos suficientes para isso.
 on:
   push:
     branches: [main, principal]
@@ -10,111 +8,127 @@ on:
       - "majeirkn/ui/**"
       - ".github/workflows/apk.yml"
   workflow_dispatch:
+    inputs:
+      runtime_url:
+        description: "URL direta do .tar.gz do runtime Snapdragon ARM64"
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # ------------------------------------------------------------ binarios
-      # O CI nao compila o llama.cpp: usa o pacote de runtime publicado como
-      # release (scripts/pack_runtime.sh). Configure o segredo do repositorio.
-      - name: Baixar o runtime do llama.cpp
+      - name: Baixar e preparar runtime
         env:
-          RUNTIME_URL: ${{ secrets.MAJEIRKN_RUNTIME_URL }}
+          INPUT_RUNTIME_URL: ${{ github.event.inputs.runtime_url }}
+          SECRET_RUNTIME_URL: ${{ secrets.MAJEIRKN_RUNTIME_URL }}
+        shell: bash
         run: |
-          if [ -z "$RUNTIME_URL" ]; then
-            echo "::error::Defina o segredo MAJEIRKN_RUNTIME_URL com o link do tarball de runtime."
+          set -Eeuo pipefail
+          RUNTIME_URL="${INPUT_RUNTIME_URL:-}"
+          if [[ -z "$RUNTIME_URL" ]]; then RUNTIME_URL="${SECRET_RUNTIME_URL:-}"; fi
+          if [[ -z "$RUNTIME_URL" ]]; then
+            echo "::error::Informe a URL direta do runtime no campo runtime_url ou configure MAJEIRKN_RUNTIME_URL."
             exit 1
           fi
-          curl -fsSL "$RUNTIME_URL" -o runtime.tar.gz
-          mkdir -p "$RUNNER_TEMP/bin"
-          tar -xzf runtime.tar.gz -C "$RUNNER_TEMP" --strip-components=1 runtime/bin
-          rm -rf android/app/src/main/assets/arm64-v8a
-          mkdir -p android/app/src/main/assets/arm64-v8a
-          find "$RUNNER_TEMP/bin" -maxdepth 1 -type f -exec cp -L {} android/app/src/main/assets/arm64-v8a/ \;
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          install -m 0755 android/app/src/main/assets/arm64-v8a/llama-server android/app/src/main/jniLibs/arm64-v8a/libllama-server.so
-          echo "llama-server empacotado como biblioteca nativa extraida pelo Android"
 
-      - name: Verificar arquitetura do runtime Android
-        # O runtime e compilado para Android ARM64. O runner do GitHub e Linux
-        # x86_64, portanto nao devemos tentar executar o llama-server aqui.
-        run: |
-          cd android/app/src/main/assets/arm64-v8a
+          curl --fail --location --retry 3 --retry-delay 2 "$RUNTIME_URL" -o "$RUNNER_TEMP/llama-runtime.tar.gz"
+          mkdir -p "$RUNNER_TEMP/runtime-unpacked"
+          tar -xzf "$RUNNER_TEMP/llama-runtime.tar.gz" -C "$RUNNER_TEMP/runtime-unpacked"
 
-          sudo apt-get update
-          sudo apt-get install -y binutils file
-
-          echo "Verificando arquitetura do llama-server..."
-          file ./llama-server
-          readelf -h ./llama-server
-
-          readelf -h ./llama-server | grep -q 'Machine:.*AArch64' || {
-            echo "::error::llama-server nao e um binario ARM64 (AArch64)"
+          ROOT="$RUNNER_TEMP/runtime-unpacked/llama.cpp"
+          SERVER="$ROOT/bin/libllama-server.so"
+          LIBDIR="$ROOT/lib"
+          if [[ ! -s "$SERVER" || ! -d "$LIBDIR" ]]; then
+            echo "::error::Runtime invalido. Esperado llama.cpp/bin/libllama-server.so e llama.cpp/lib/*.so."
+            find "$RUNNER_TEMP/runtime-unpacked" -maxdepth 4 -type f -print
             exit 1
-          }
+          fi
 
-          for lib in \
-            libggml-base.so.0.28.0 \
-            libggml-cpu.so.0.28.0 \
-            libggml.so.0.28.0 \
-            libllama-common.so.0.8.0 \
-            libllama.so.0.8.0 \
-            libmtmd.so.0.8.0 \
-            libssl.so.3 \
-            libcrypto.so.3 \
-            libc++_shared.so \
-            libllama-server-impl.so; do
+          ASSETS="android/app/src/main/assets/arm64-v8a"
+          JNI="android/app/src/main/jniLibs/arm64-v8a"
+          rm -rf "$ASSETS" "$JNI"
+          mkdir -p "$ASSETS" "$JNI"
+          find "$LIBDIR" -maxdepth 1 -type f -name '*.so' -exec cp -L {} "$ASSETS/" \;
+          install -m 0755 "$SERVER" "$JNI/libllama-server.so"
 
-            test -s "$lib" || {
-              echo "::error::Biblioteca ausente ou vazia: $lib"
-              exit 1
-            }
-
-            readelf -h "$lib" | grep -q 'Machine:.*AArch64' || {
-              echo "::error::Biblioteca nao e ARM64: $lib"
-              exit 1
-            }
+          REQUIRED_LIBS=(
+            libllama-server-impl.so
+            libllama-common.so
+            libmtmd.so
+            libllama.so
+            libggml.so
+            libggml-cpu.so
+            libggml-opencl.so
+            libggml-hexagon.so
+            libggml-base.so
+          )
+          for lib in "${REQUIRED_LIBS[@]}"; do
+            test -s "$ASSETS/$lib" || { echo "::error::Biblioteca ausente: $lib"; exit 1; }
           done
 
-          echo "Runtime Android ARM64 validado com sucesso!"
-
-
-      # ------------------------------------------------------- interface web
-      - name: Copiar a interface web
+      - name: Validar arquitetura ARM64
+        shell: bash
         run: |
-          rm -rf android/app/src/main/assets/webui
-          mkdir -p android/app/src/main/assets/webui
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils file
+          ASSETS="android/app/src/main/assets/arm64-v8a"
+          SERVER="android/app/src/main/jniLibs/arm64-v8a/libllama-server.so"
+          file "$SERVER"
+          readelf -h "$SERVER" | grep -q 'Machine:.*AArch64' || { echo "::error::Servidor nao e AArch64."; exit 1; }
+
+          REQUIRED_LIBS=(
+            libllama-server-impl.so
+            libllama-common.so
+            libmtmd.so
+            libllama.so
+            libggml.so
+            libggml-cpu.so
+            libggml-opencl.so
+            libggml-hexagon.so
+            libggml-base.so
+          )
+          for lib in "${REQUIRED_LIBS[@]}"; do
+            file "$ASSETS/$lib"
+            readelf -h "$ASSETS/$lib" | grep -q 'Machine:.*AArch64' || { echo "::error::$lib nao e ELF ARM64."; exit 1; }
+          done
+          echo "Bibliotecas AArch64 validadas. Os arquivos libggml-htp-v*.so sao blobs Qualcomm DSP6 e nao ELF ARM64."
+
+      - name: Copiar interface web e licencas
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p android/app/src/main/assets/webui android/app/src/main/assets/licenses
           cp -a majeirkn/ui/. android/app/src/main/assets/webui/
+          cp LICENSE android/app/src/main/assets/licenses/majeirkn-MIT.txt
+          curl --fail --location https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE -o android/app/src/main/assets/licenses/llama.cpp-MIT.txt
 
-      - name: Copiar as licencas
-        run: |
-          mkdir -p android/app/src/main/assets/licenses
-          cp -a LICENSE android/app/src/main/assets/licenses/majeirkn-MIT.txt
-          curl -fsSL https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE \
-            -o android/app/src/main/assets/licenses/llama.cpp-MIT.txt || true
-
-      # -------------------------------------------------------------- build
-      - uses: actions/setup-java@v4
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Configurar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      # assembleDebug ja vem assinado com a chave de depuracao: instalavel sem
-      # configurar keystore. Para publicar na Play, use assembleRelease.
-      - name: Build do APK
+      - name: Compilar APK de depuracao
         working-directory: android
         run: gradle assembleDebug --no-daemon
 
-      - name: Publicar o APK
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: majeirkn-apk
+          name: majeirkn-apk-arm64
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
